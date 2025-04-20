@@ -16,8 +16,9 @@ class ConvNet(nn.Module):
         return self.model(x)
 
 class DecisionTree:
-    def __init__(self, max_depth=7):
+    def __init__(self, max_depth=7, min_gain=0.01):
         self.max_depth = max_depth
+        self.min_gain = min_gain  # Minimum information gain to allow a split
         self.tree = None
 
     def fit(self, X: pd.DataFrame, y: np.ndarray):
@@ -25,12 +26,15 @@ class DecisionTree:
         self.tree = self._build_tree(X, y, depth=0)
 
     def _build_tree(self, X: pd.DataFrame, y: np.ndarray, depth: int):
+        # Stopping conditions: max depth reached or pure node
         if depth >= self.max_depth or len(np.unique(y)) == 1:
             return self._create_leaf_node(y)
         feature_idx, threshold = self._best_split(X, y)
+        # If no valid split is found (gain too low or none possible), create leaf
         if feature_idx is None:
             return self._create_leaf_node(y)
         X_left, y_left, X_right, y_right = self._split_data(X, y, feature_idx, threshold)
+        # Avoid empty splits
         if len(y_left) == 0 or len(y_right) == 0:
             return self._create_leaf_node(y)
         left_subtree = self._build_tree(X_left, y_left, depth + 1)
@@ -62,25 +66,35 @@ class DecisionTree:
         parent_entropy = self._entropy(y)
         n_samples = len(y)
 
-        for feature_idx in X.columns:
-            thresholds = np.unique(X[feature_idx])
+        # Iterate over all features (0 to 299)
+        for feature_idx in range(X.shape[1]):
+            values = X.iloc[:, feature_idx].values
+            # Use percentiles as thresholds to reduce computation (e.g., 25th, 50th, 75th)
+            thresholds = np.percentile(values, [25, 50, 75])
             for threshold in thresholds:
-                left_mask = X[feature_idx] <= threshold
+                left_mask = X.iloc[:, feature_idx] <= threshold
                 y_left = y[left_mask]
                 y_right = y[~left_mask]
                 if len(y_left) == 0 or len(y_right) == 0:
                     continue
-                gain = parent_entropy - self._entropy(y_left) * len(y_left)/n_samples - self._entropy(y_right) * len(y_right)/n_samples
-                if gain > best_gain:
+                # Corrected information gain calculation
+                child_entropy = (len(y_left) / n_samples * self._entropy(y_left) + 
+                                len(y_right) / n_samples * self._entropy(y_right))
+                gain = parent_entropy - child_entropy
+                if gain > best_gain and gain >= self.min_gain:
                     best_gain = gain
                     best_feature = feature_idx
                     best_threshold = threshold
-        return best_feature, best_threshold
+        # Only return a split if gain exceeds min_gain
+        if best_gain >= self.min_gain:
+            return best_feature, best_threshold
+        return None, None
 
     def _entropy(self, y: np.ndarray) -> float:
         counts = np.bincount(y)
         probabilities = counts / len(y)
-        return -np.sum([p * np.log2(p) for p in probabilities if p > 0])
+        probabilities = probabilities[probabilities > 0]  # Avoid log(0)
+        return -np.sum(probabilities * np.log2(probabilities))
 
 def get_features_and_labels(model: ConvNet, dataloader: DataLoader, device) -> Tuple[List, List]:
     model.eval()
