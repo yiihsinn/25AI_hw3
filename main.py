@@ -33,7 +33,15 @@ def main():
 
     model = CNN().to(device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=1e-4,
+        weight_decay=1e-4    # ← 新增這行
+    )
+
+    patience      = 3
+    best_val_loss = float('inf')
+    no_improve    = 0
 
     train_losses = []
     val_losses = []
@@ -49,10 +57,15 @@ def main():
 
         logger.info(f"Epoch {epoch+1}/{EPOCHS} - Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
 
-        if val_acc > max_acc:
-            max_acc = val_acc
-            best_model = model.state_dict()
-            torch.save(best_model, 'best_model.pth')
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            no_improve    = 0
+            torch.save(model.state_dict(), 'best_model.pth')
+        else:
+            no_improve += 1
+            if no_improve >= patience:
+                logger.info(f"Early stopping at epoch {epoch+1}")
+                break
 
     logger.info(f"Best Accuracy: {max_acc:.4f}")
 
